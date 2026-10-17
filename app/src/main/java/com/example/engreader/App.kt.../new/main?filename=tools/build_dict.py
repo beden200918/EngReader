@@ -34,12 +34,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 
-// ---------- 分词 ----------
-
 data class Word(val text: String, val start: Int, val end: Int)
 
 object Tokenizer {
-    // 只把字母词当可点单元；数字、标点、空格不可点
     private val wordRegex = Regex("[A-Za-z]+(?:['’][A-Za-z]+)*")
 
     fun wordTokens(text: String): List<Word> =
@@ -58,10 +55,7 @@ object Tokenizer {
         return text.substring(s, e).trim()
     }
 }
-
-// ---------- 入口 ----------
-
-             class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val prefs = getSharedPreferences("crash", MODE_PRIVATE)
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -111,7 +105,6 @@ private fun CrashScreen(trace: String, onClear: () -> Unit) {
         }
     }
 }
-
 private enum class Tab { Reader, Vocab }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -131,7 +124,6 @@ fun App() {
         loading = false
     }
 
-    // 更新词库：选一个新的 dictionary.db，校验后原地替换
     val importDb = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             reloading = true
@@ -202,9 +194,6 @@ fun App() {
         }
     }
 }
-
-// ---------- 阅读页 ----------
-
 @Composable
 private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
     val ctx = LocalContext.current
@@ -222,4 +211,307 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
     var entry by remember { mutableStateOf<DictEntry?>(null) }
     var hint by remember { mutableStateOf("") }
 
-    val openTxt = rememberLauncherForActivityResult(Activ
+    val openTxt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val t = runCatching {
+                ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            if (!t.isNullOrBlank()) {
+                paragraphs = Tokenizer.splitParagraphs(t)
+                source = uri.lastPathSegment ?: "导入文本"
+                selPara = -1; anchor = -1; selFrom = -1; selTo = -1
+            }
+        }
+    }
+
+    val allWords = remember(paragraphs) { paragraphs.map { Tokenizer.wordTokens(it) } }
+    val words = if (selPara in paragraphs.indices) allWords[selPara] else emptyList()
+    val term: String? =
+        if (selPara in paragraphs.indices && selFrom in words.indices && selTo in words.indices)
+            words.subList(selFrom, selTo + 1).joinToString(" ") { it.text }
+        else null
+
+    LaunchedEffect(term) {
+        if (term == null) {
+            entry = null; hint = ""
+        } else {
+            entry = withContext(Dispatchers.IO) { dict.lookup(term) }
+            hint = ""
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = { openTxt.launch(arrayOf("text/plain")) }) { Text("打开 txt") }
+            OutlinedButton(onClick = { showPaste = true }) { Text("粘贴文本") }
+            if (paragraphs.isNotEmpty()) {
+                TextButton(onClick = {
+                    paragraphs = emptyList()
+                    selPara = -1; anchor = -1; selFrom = -1; selTo = -1
+                }) { Text("清空") }
+            }
+        }
+
+        Box(Modifier.weight(1f)) {
+            if (paragraphs.isEmpty()) {
+                Column(Modifier.fillMaxSize().padding(24.dp)) {
+                    Text("使用说明", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "1. 导入或粘贴一段英文文本。\n2. 点一下某个词 = 选中它。\n3. 再点相邻的词 = 自动扩成词组。\n4. 长按任意词 = 以它为起点重新选。\n5. 卡片里点“加入生词本”收录，附带原句。",
+                        lineHeight = 26.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    itemsIndexed(paragraphs) { idx, p ->
+                        SelectableParagraph(
+                            text = p,
+                            selFrom = if (selPara == idx) selFrom else null,
+                            selTo = if (selPara == idx) selTo else null,
+                            onTapWord = { w ->
+                                if (selPara != idx) {
+                                    selPara = idx; anchor = w; selFrom = w; selTo = w
+                                } else if (anchor == w) {
+                                    selFrom = w; selTo = w
+                                } else {
+                                    selFrom = minOf(anchor, w)
+                                    selTo = maxOf(anchor, w)
+                                }
+                            },
+                            onLongPressWord = { w ->
+                                selPara = idx; anchor = w; selFrom = w; selTo = w
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        if (term != null) {
+            LookupCard(
+                term = term,
+                entry = entry,
+                hint = hint,
+                onAdd = {
+                    val sent =
+                        if (selPara in paragraphs.indices && selFrom in words.indices && selTo in words.indices)
+                            Tokenizer.sentenceAround(
+                                paragraphs[selPara],
+                                words[selFrom].start,
+                                words[selTo].end
+                            )
+                        else ""
+                    val ok = store.add(term, entry, sent, source)
+                    hint = if (ok) "✓ 已加入生词本" else "这个词已经在生词本里了"
+                },
+                onClear = { selPara = -1; anchor = -1; selFrom = -1; selTo = -1 }
+            )
+        }
+    }
+
+    if (showPaste) {
+        AlertDialog(
+            onDismissRequest = { showPaste = false },
+            title = { Text("粘贴英文文本") },
+            text = {
+                OutlinedTextField(
+                    value = pasteText,
+                    onValueChange = { pasteText = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 320.dp),
+                    placeholder = { Text("把文章粘贴到这里…") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pasteText.isNotBlank()) {
+                        paragraphs = Tokenizer.splitParagraphs(pasteText)
+                        source = "粘贴文本"
+                        selPara = -1; anchor = -1; selFrom = -1; selTo = -1
+                    }
+                    showPaste = false
+                    pasteText = ""
+                }) { Text("导入") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPaste = false }) { Text("取消") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SelectableParagraph(
+    text: String,
+    selFrom: Int?,
+    selTo: Int?,
+    onTapWord: (Int) -> Unit,
+    onLongPressWord: (Int) -> Unit
+) {
+    val words = remember(text) { Tokenizer.wordTokens(text) }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    val annotated = remember(text, selFrom, selTo) {
+        buildAnnotatedString {
+            append(text)
+            if (selFrom != null && selTo != null &&
+                selFrom in words.indices && selTo in words.indices && selFrom <= selTo
+            ) {
+                addStyle(SpanStyle(background = Color(0xFFFFE082)), words[selFrom].start, words[selTo].end)
+            }
+        }
+    }
+
+    Text(
+        text = annotated,
+        style = TextStyle(fontSize = 17.sp, lineHeight = 28.sp),
+        onTextLayout = { layout = it },
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(words) {
+                fun hit(pos: Offset): Int? {
+                    val l = layout ?: return null
+                    val off = l.getOffsetForPosition(pos)
+                    val exact = words.indexOfFirst { off >= it.start && off < it.end }
+                    if (exact >= 0) return exact
+                    val near = words.minByOrNull {
+                        minOf(abs(it.start - off), abs(it.end - off))
+                    } ?: return null
+                    return words.indexOf(near)
+                }
+                detectTapGestures(
+                    onTap = { hit(it)?.let(onTapWord) },
+                    onLongPress = { hit(it)?.let(onLongPressWord) }
+                )
+            }
+    )
+}
+@Composable
+private fun LookupCard(
+    term: String,
+    entry: DictEntry?,
+    hint: String,
+    onAdd: () -> Unit,
+    onClear: () -> Unit
+) {
+    ElevatedCard(Modifier.fillMaxWidth().padding(8.dp)) {
+        Column(
+            Modifier
+                .padding(16.dp)
+                .heightIn(max = 300.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(term, style = MaterialTheme.typography.titleLarge)
+                if (!entry?.phonetic.isNullOrBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("/${entry!!.phonetic}/", color = MaterialTheme.colorScheme.outline)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            if (entry == null) {
+                Text("词库未收录该词条", color = MaterialTheme.colorScheme.error)
+            } else {
+                if (entry.pos.isNotBlank()) {
+                    Text(entry.pos, style = MaterialTheme.typography.labelMedium)
+                }
+                if (entry.translation.isNotBlank()) {
+                    Text(entry.translation)
+                }
+                if (entry.definition.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "EN: ${entry.definition}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAdd) { Text("加入生词本") }
+                TextButton(onClick = onClear) { Text("取消选择") }
+            }
+            if (hint.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(hint, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VocabScreen(store: VocabStore) {
+    val ctx = LocalContext.current
+    var rows by remember { mutableStateOf(store.list()) }
+
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            runCatching {
+                ctx.contentResolver.openOutputStream(uri)?.use {
+                    it.write(store.exportCsv().toByteArray(Charsets.UTF_8))
+                }
+            }
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("共 ${rows.size} 条", Modifier.weight(1f))
+            TextButton(onClick = { export.launch("vocab.csv") }) { Text("导出 CSV") }
+        }
+        if (rows.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("生词本还是空的")
+            }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(rows, key = { it.id }) { item ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    item.term,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    store.delete(item.id)
+                                    rows = store.list()
+                                }) { Text("删除") }
+                            }
+                            if (item.phonetic.isNotBlank()) {
+                                Text("/${item.phonetic}/", style = MaterialTheme.typography.bodySmall)
+                            }
+                            if (item.translation.isNotBlank()) Text(item.translation)
+                            if (item.context.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    item.context,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
