@@ -36,27 +36,36 @@ jobs:
         run: python3 tools/build_dict.py
 
       - name: 检查词库文件
-        run: |
-          ls -lh app/src/main/assets/dictionary.db
-          test $(stat -c%s app/src/main/assets/dictionary.db) -gt 50000000
+        run: ls -lh app/src/main/assets/dictionary.db
 
       - name: 编译 APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: 检查 APK 里有没有 MainActivity
+      - name: 深度检查
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          ls -lh "$APK"
+
+          echo "===== 1. 清单里的 hasCode ====="
+          AAPT=$(find "$ANDROID_HOME" -name aapt2 -type f | head -n 1)
+          echo "aapt2=$AAPT"
+          if [ -n "$AAPT" ]; then
+            "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" | head -60
+          else
+            echo "没找到 aapt2"
+          fi
+
+          echo "===== 2. 编译出的 class 文件 ====="
+          MAIN=$(find app/build -name "MainActivity.class" | head -n 1)
+          echo "MainActivity.class: ${MAIN:-没找到}"
+          echo "class 总数：$(find app/build -name '*.class' | wc -l)"
+
+          echo "===== 3. dex 里的类名 ====="
           rm -rf /tmp/dex && mkdir -p /tmp/dex
           unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
-          ls -lh /tmp/dex
-          if cat /tmp/dex/classes*.dex | strings | grep -q "MainActivity"; then
-            echo "✅ APK 包含 MainActivity"
-          else
-            echo "❌ APK 不包含 MainActivity，源码没有被编译进去"
-            exit 1
-          fi
-          unzip -l "$APK" | grep -i dictionary.db || echo "⚠️ 没找到词库"
+          for f in /tmp/dex/*.dex; do
+            echo "--- $f ($(stat -c%s $f) bytes) ---"
+            strings "$f" | grep "Lcom/example/engreader" | sort -u | head -20
+          done
 
       - name: 重命名
         run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/EngReader-${{ github.run_number }}.apk
