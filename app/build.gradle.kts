@@ -4,21 +4,41 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val keystoreFile = rootProject.file("signing/keystore.jks")
+
 android {
     namespace = "com.example.engreader"
     compileSdk = 35
+
+    signingConfigs {
+        if (keystoreFile.exists()) {
+            create("stable") {
+                storeFile = keystoreFile
+                storePassword = "engreader123"
+                keyAlias = "engreader"
+                keyPassword = "engreader123"
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.example.engreader.v2"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     buildTypes {
-        release { isMinifyEnabled = false }
+        getByName("debug") {
+            if (keystoreFile.exists()) {
+                signingConfig = signingConfigs.getByName("stable")
+            }
+        }
+        release {
+            isMinifyEnabled = false
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -26,7 +46,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    // .db 不压缩，避免安装包里塞一个巨型压缩文件、也省首次解压时间
     androidResources { noCompress += "db" }
 }
 
