@@ -35,11 +35,34 @@ jobs:
       - name: 编译词库
         run: python3 tools/build_dict.py
 
+      - name: 检查词库文件
+        run: |
+          ls -lh app/src/main/assets/dictionary.db
+          test $(stat -c%s app/src/main/assets/dictionary.db) -gt 50000000
+
       - name: 编译 APK
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: 检查 APK 里有没有 MainActivity
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          ls -lh "$APK"
+          rm -rf /tmp/dex && mkdir -p /tmp/dex
+          unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
+          ls -lh /tmp/dex
+          if cat /tmp/dex/classes*.dex | strings | grep -q "MainActivity"; then
+            echo "✅ APK 包含 MainActivity"
+          else
+            echo "❌ APK 不包含 MainActivity，源码没有被编译进去"
+            exit 1
+          fi
+          unzip -l "$APK" | grep -i dictionary.db || echo "⚠️ 没找到词库"
+
+      - name: 重命名
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/EngReader-${{ github.run_number }}.apk
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: EngReader-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: EngReader-apk-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/EngReader-${{ github.run_number }}.apk
