@@ -1,4 +1,7 @@
 name: Build APK
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ main ]
@@ -32,6 +35,32 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: 准备固定签名
+        run: |
+          mkdir -p signing
+          if [ ! -f signing/keystore.jks ]; then
+            keytool -genkeypair -v \
+              -keystore signing/keystore.jks \
+              -storepass engreader123 \
+              -keypass engreader123 \
+              -alias engreader \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=EngReader, OU=Personal, O=EngReader, L=Unknown, ST=Unknown, C=CN"
+          fi
+          ls -lh signing
+
+      - name: 保存签名文件
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add signing/keystore.jks
+          if git diff --cached --quiet; then
+            echo "签名文件已存在"
+          else
+            git commit -m "chore: 添加固定签名文件"
+            git push origin HEAD:main
+          fi
+
       - name: 编译词库
         run: python3 tools/build_dict.py
 
@@ -41,31 +70,18 @@ jobs:
       - name: 编译 APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: 深度检查
+      - name: 验证签名
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-
-          echo "===== 1. 清单里的 hasCode ====="
-          AAPT=$(find "$ANDROID_HOME" -name aapt2 -type f | head -n 1)
-          echo "aapt2=$AAPT"
-          if [ -n "$AAPT" ]; then
-            "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" | head -60
-          else
-            echo "没找到 aapt2"
-          fi
-
-          echo "===== 2. 编译出的 class 文件 ====="
-          MAIN=$(find app/build -name "MainActivity.class" | head -n 1)
-          echo "MainActivity.class: ${MAIN:-没找到}"
-          echo "class 总数：$(find app/build -name '*.class' | wc -l)"
-
-          echo "===== 3. dex 里的类名 ====="
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | head -n 10
           rm -rf /tmp/dex && mkdir -p /tmp/dex
           unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
-          for f in /tmp/dex/*.dex; do
-            echo "--- $f ($(stat -c%s $f) bytes) ---"
-            strings "$f" | grep "Lcom/example/engreader" | sort -u | head -20
-          done
+          if cat /tmp/dex/classes*.dex | strings | grep -q "MainActivity"; then
+            echo "✅ 包含 MainActivity"
+          else
+            echo "❌ 不包含 MainActivity"
+            exit 1
+          fi
 
       - name: 重命名
         run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/EngReader-${{ github.run_number }}.apk
