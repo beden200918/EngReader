@@ -1,6 +1,7 @@
 package com.example.engreader
 
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,13 +61,53 @@ object Tokenizer {
 
 // ---------- 入口 ----------
 
-class MainActivity : ComponentActivity() {
+             class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        val prefs = getSharedPreferences("crash", MODE_PRIVATE)
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            prefs.edit().putString("last_crash", Log.getStackTraceString(error)).commit()
+            previous?.uncaughtException(thread, error)
+        }
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { App() }
+                Surface(Modifier.fillMaxSize()) {
+                    val crash = prefs.getString("last_crash", null)
+                    if (crash != null) {
+                        CrashScreen(crash) {
+                            prefs.edit().remove("last_crash").apply()
+                        }
+                    } else {
+                        App()
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun CrashScreen(trace: String, onClear: () -> Unit) {
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            "上次启动崩溃了",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.error
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(trace, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", trace))
+            }) { Text("复制错误信息") }
+            TextButton(onClick = onClear) { Text("清除") }
         }
     }
 }
