@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.engreader"
+        applicationId = "com.example.engreader.v2"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
