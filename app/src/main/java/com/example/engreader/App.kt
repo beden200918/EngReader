@@ -478,14 +478,16 @@ private fun LookupCard(
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var translation by remember(term) { mutableStateOf<String?>(null) }
-    var translating by remember(term) { mutableStateOf(false) }
+    var termTrans by remember(term) { mutableStateOf<String?>(null) }
+    var termTranslating by remember(term) { mutableStateOf(false) }
+    var sentenceTrans by remember(term) { mutableStateOf<String?>(null) }
+    var sentenceTranslating by remember(term) { mutableStateOf(false) }
 
     ElevatedCard(Modifier.fillMaxWidth().padding(8.dp)) {
         Column(
             Modifier
                 .padding(16.dp)
-                .heightIn(max = 380.dp)
+                .heightIn(max = 420.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -507,6 +509,26 @@ private fun LookupCard(
 
             if (entry == null) {
                 Text("词库未收录该词条", color = MaterialTheme.colorScheme.error)
+                if (Prefs.onlineEnabled(ctx)) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            termTranslating = true
+                            termTrans = Translator.translate(ctx, term)
+                            termTranslating = false
+                        }
+                    }) {
+                        Text(if (termTranslating) "翻译中…" else "翻译选中的内容")
+                    }
+                    termTrans?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    Text(
+                        "开启「联网增强」后可翻译",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             } else {
                 if (entry.pos.isNotBlank()) {
                     Text(entry.pos, style = MaterialTheme.typography.labelMedium)
@@ -537,14 +559,14 @@ private fun LookupCard(
                 if (Prefs.onlineEnabled(ctx)) {
                     TextButton(onClick = {
                         scope.launch {
-                            translating = true
-                            translation = Translator.translate(ctx, sentence)
-                            translating = false
+                            sentenceTranslating = true
+                            sentenceTrans = Translator.translate(ctx, sentence)
+                            sentenceTranslating = false
                         }
                     }) {
-                        Text(if (translating) "翻译中…" else "译成中文")
+                        Text(if (sentenceTranslating) "翻译中…" else "翻译例句")
                     }
-                    translation?.let {
+                    sentenceTrans?.let {
                         Text(
                             it,
                             style = MaterialTheme.typography.bodySmall,
