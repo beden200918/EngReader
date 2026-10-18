@@ -504,6 +504,7 @@ private fun LookupCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VocabScreen(store: VocabStore, dict: Dictionary) {
     val ctx = LocalContext.current
