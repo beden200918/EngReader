@@ -31,11 +31,20 @@ class Dictionary(context: Context) {
     fun lookup(raw: String): DictEntry? {
         val q = raw.trim().lowercase().replace(Regex("\\s+"), " ")
         if (q.isEmpty()) return null
+
         find(q)?.let { return it }
+
         if (!q.contains(' ')) {
-            val lemma = findLemma(q)
+            val lemma = findLemma(q) ?: ruleLemma(q)
             if (lemma != null && lemma != q) find(lemma)?.let { return it }
+            return null
         }
+
+        val parts = q.split(" ")
+        val lemmas = parts.map { p -> findLemma(p) ?: ruleLemma(p) ?: p }
+        val joined = lemmas.joinToString(" ")
+        if (joined != q) find(joined)?.let { return it }
+
         return null
     }
 
@@ -90,8 +99,18 @@ class Dictionary(context: Context) {
 
     fun lemmaOf(word: String): String? {
         val q = word.trim().lowercase()
-        if (q.isEmpty() || q.contains(' ')) return null
+        if (q.isEmpty()) return null
+        if (q.contains(' ')) {
+            val parts = q.split(" ")
+            val lemmas = parts.map { p -> findLemma(p) ?: ruleLemma(p) ?: p }
+            val joined = lemmas.joinToString(" ")
+            return if (joined != q) joined else null
+        }
         findLemma(q)?.let { if (it != q) return it }
+        return ruleLemma(q)
+    }
+
+    private fun ruleLemma(q: String): String? {
         val rules = listOf(
             "ies" to "y", "ied" to "y", "ing" to "", "ed" to "",
             "es" to "", "s" to "", "ly" to "", "er" to "", "est" to ""
@@ -111,7 +130,6 @@ class Dictionary(context: Context) {
         }
         return null
     }
-
     fun similar(word: String, limit: Int = 8): List<DictEntry> {
         val q = word.trim().lowercase()
         if (q.length < 3) return emptyList()
