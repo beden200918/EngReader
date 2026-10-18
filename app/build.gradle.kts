@@ -50,6 +50,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.mlkit:text-recognition:16.0.0")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
