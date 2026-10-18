@@ -307,6 +307,11 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore, memo: ReaderMemo) 
             words.subList(selFrom, selTo + 1).joinToString(" ") { it.text }
         else null
 
+    val currentSentence =
+        if (selPara in paragraphs.indices && selFrom in words.indices && selTo in words.indices)
+            Tokenizer.sentenceAround(paragraphs[selPara], words[selFrom].start, words[selTo].end)
+        else ""
+
     LaunchedEffect(term) {
         if (term == null) {
             entry = null; hint = ""
@@ -375,17 +380,10 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore, memo: ReaderMemo) 
             LookupCard(
                 term = term,
                 entry = entry,
+                sentence = currentSentence,
                 hint = hint,
                 onAdd = {
-                    val sent =
-                        if (selPara in paragraphs.indices && selFrom in words.indices && selTo in words.indices)
-                            Tokenizer.sentenceAround(
-                                paragraphs[selPara],
-                                words[selFrom].start,
-                                words[selTo].end
-                            )
-                        else ""
-                    val ok = store.add(term, entry, sent, source)
+                    val ok = store.add(term, entry, currentSentence, source)
                     hint = if (ok) "✓ 已加入生词本" else "这个词已经在生词本里了"
                 },
                 onClear = { selPara = -1; anchor = -1; selFrom = -1; selTo = -1 }
@@ -473,15 +471,21 @@ private fun SelectableParagraph(
 private fun LookupCard(
     term: String,
     entry: DictEntry?,
+    sentence: String,
     hint: String,
     onAdd: () -> Unit,
     onClear: () -> Unit
 ) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var translation by remember(term) { mutableStateOf<String?>(null) }
+    var translating by remember(term) { mutableStateOf(false) }
+
     ElevatedCard(Modifier.fillMaxWidth().padding(8.dp)) {
         Column(
             Modifier
                 .padding(16.dp)
-                .heightIn(max = 300.dp)
+                .heightIn(max = 380.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -514,6 +518,42 @@ private fun LookupCard(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "EN: ${entry.definition}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (sentence.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "例句",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(sentence, style = MaterialTheme.typography.bodySmall)
+
+                if (Prefs.onlineEnabled(ctx)) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            translating = true
+                            translation = Translator.translate(ctx, sentence)
+                            translating = false
+                        }
+                    }) {
+                        Text(if (translating) "翻译中…" else "译成中文")
+                    }
+                    translation?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Text(
+                        "开启「联网增强」后可翻译例句",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
