@@ -223,7 +223,7 @@ fun App() {
                     }
                     tab == Tab.Reader -> ReaderScreen(dict!!, store)
                     tab == Tab.Search -> SearchScreen(dict!!, store)
-                    tab == Tab.Vocab -> VocabScreen(store)
+                    tab == Tab.Vocab -> VocabScreen(store, dict!!)
                     else -> SettingsScreen(
                         themeMode = themeMode,
                         fontLevel = fontLevel,
@@ -505,9 +505,20 @@ private fun LookupCard(
 }
 
 @Composable
-private fun VocabScreen(store: VocabStore) {
+private fun VocabScreen(store: VocabStore, dict: Dictionary) {
     val ctx = LocalContext.current
     var rows by remember { mutableStateOf(store.list()) }
+    var query by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf<VocabStore.Item?>(null) }
+
+    val shown = remember(rows, query) {
+        val q = query.trim()
+        if (q.isEmpty()) rows else rows.filter {
+            it.term.contains(q, true) ||
+                it.translation.contains(q) ||
+                it.context.contains(q, true)
+        }
+    }
 
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
@@ -520,16 +531,39 @@ private fun VocabScreen(store: VocabStore) {
     }
 
     Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            placeholder = { Text("在生词本中查找单词、释义或原句") },
+            singleLine = true,
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    TextButton(onClick = { query = "" }) { Text("清除") }
+                }
+            }
+        )
+
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("共 ${rows.size} 条", Modifier.weight(1f))
+            Text(
+                if (query.isBlank()) "共 ${rows.size} 条" else "找到 ${shown.size} 条",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
             TextButton(onClick = { export.launch("vocab.csv") }) { Text("导出 CSV") }
         }
+
         if (rows.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("生词本还是空的")
+                Text("生词本还是空的", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else if (shown.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("没有匹配的条目", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -537,36 +571,61 @@ private fun VocabScreen(store: VocabStore) {
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(rows, key = { it.id }) { item ->
-                    Card(Modifier.fillMaxWidth()) {
+                items(shown, key = { it.id }) { item ->
+                    Card(
+                        onClick = { selected = item },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Column(Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    item.term,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Text(item.term, style = MaterialTheme.typography.titleMedium)
+                                if (item.phonetic.isNotBlank()) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "/${item.phonetic}/",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.weight(1f))
                                 TextButton(onClick = {
                                     store.delete(item.id)
                                     rows = store.list()
                                 }) { Text("删除") }
                             }
-                            if (item.phonetic.isNotBlank()) {
-                                Text("/${item.phonetic}/", style = MaterialTheme.typography.bodySmall)
+                            if (item.translation.isNotBlank()) {
+                                Text(
+                                    item.translation,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2
+                                )
                             }
-                            if (item.translation.isNotBlank()) Text(item.translation)
                             if (item.context.isNotBlank()) {
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     item.context,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    val sel = selected
+    if (sel != null) {
+        val entry = DictEntry(sel.term, sel.phonetic, sel.translation, sel.definition, "")
+        ModalBottomSheet(onDismissRequest = { selected = null }) {
+            WordSheet(
+                entry = entry,
+                lemma = dict.lemmaOf(sel.term),
+                related = dict.phrasesOf(sel.term),
+                onAdd = { selected = null }
+            )
         }
     }
 }
