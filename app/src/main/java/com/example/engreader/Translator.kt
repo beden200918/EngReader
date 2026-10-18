@@ -38,7 +38,9 @@ object Translator {
 
             val json = JSONObject(body)
             if (json.has("error_code")) {
-                return@withContext "翻译失败：" + json.optString("error_msg", json.optString("error_code"))
+                val code = json.optString("error_code", "?")
+                val msg = json.optString("error_msg", "")
+                return@withContext "翻译失败（$code）：$msg"
             }
             val arr = json.getJSONArray("trans_result")
             val sb = StringBuilder()
