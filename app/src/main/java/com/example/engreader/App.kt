@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,17 +66,17 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) {
-                    val crash = prefs.getString("last_crash", null)
-                    if (crash != null) {
+            val crash = prefs.getString("last_crash", null)
+            if (crash != null) {
+                MaterialTheme {
+                    Surface(Modifier.fillMaxSize()) {
                         CrashScreen(crash) {
                             prefs.edit().remove("last_crash").apply()
                         }
-                    } else {
-                        App()
                     }
                 }
+            } else {
+                App()
             }
         }
     }
@@ -105,91 +106,145 @@ private fun CrashScreen(trace: String, onClear: () -> Unit) {
         }
     }
 }
-private enum class Tab { Reader, Vocab }
+private enum class Tab { Reader, Search, Vocab, Settings }
+
+private fun scaleOf(level: Int): Float = when (level) {
+    0 -> 0.85f
+    2 -> 1.15f
+    3 -> 1.30f
+    else -> 1.0f
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val store = remember { VocabStore(ctx) }
+    var themeMode by remember { mutableStateOf(Prefs.themeMode(ctx)) }
+    var fontLevel by remember { mutableStateOf(Prefs.fontLevel(ctx)) }
+    var online by remember { mutableStateOf(Prefs.onlineEnabled(ctx)) }
 
-    var tab by remember { mutableStateOf(Tab.Reader) }
-    var dict by remember { mutableStateOf<Dictionary?>(null) }
-    var loading by remember { mutableStateOf(true) }
-    var reloading by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        dict = withContext(Dispatchers.IO) { Dictionary(ctx) }
-        loading = false
+    val dark = when (themeMode) {
+        1 -> false
+        2 -> true
+        else -> isSystemInDarkTheme()
     }
 
-    val importDb = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            reloading = true
-            scope.launch {
-                val ok = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val tmp = File(ctx.filesDir, "dictionary_new.db")
-                        ctx.contentResolver.openInputStream(uri)!!.use { i ->
-                            tmp.outputStream().use { o -> i.copyTo(o) }
-                        }
-                        val probe = SQLiteDatabase.openDatabase(tmp.path, null, SQLiteDatabase.OPEN_READONLY)
-                        val valid = probe.rawQuery(
-                            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='dict'", null
-                        ).use { it.moveToFirst() && it.getInt(0) > 0 }
-                        probe.close()
-                        if (valid) {
-                            val target = File(ctx.filesDir, "dictionary.db")
-                            if (target.exists()) target.delete()
-                            tmp.renameTo(target)
-                        } else tmp.delete()
-                        valid
-                    }.getOrDefault(false)
+    EngReaderTheme(darkTheme = dark, fontScale = scaleOf(fontLevel)) {
+        val scope = rememberCoroutineScope()
+        val store = remember { VocabStore(ctx) }
+        var tab by remember { mutableStateOf(Tab.Reader) }
+        var dict by remember { mutableStateOf<Dictionary?>(null) }
+        var loading by remember { mutableStateOf(true) }
+        var reloading by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            dict = withContext(Dispatchers.IO) { Dictionary(ctx) }
+            loading = false
+        }
+
+        val importDb = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                reloading = true
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val tmp = File(ctx.filesDir, "dictionary_new.db")
+                            ctx.contentResolver.openInputStream(uri)!!.use { i ->
+                                tmp.outputStream().use { o -> i.copyTo(o) }
+                            }
+                            val probe = SQLiteDatabase.openDatabase(tmp.path, null, SQLiteDatabase.OPEN_READONLY)
+                            val valid = probe.rawQuery(
+                                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='dict'", null
+                            ).use { it.moveToFirst() && it.getInt(0) > 0 }
+                            probe.close()
+                            if (valid) {
+                                val target = File(ctx.filesDir, "dictionary.db")
+                                if (target.exists()) target.delete()
+                                tmp.renameTo(target)
+                            } else tmp.delete()
+                            valid
+                        }.getOrDefault(false)
+                    }
+                    if (ok) dict = withContext(Dispatchers.IO) { Dictionary(ctx) }
+                    reloading = false
                 }
-                if (ok) dict = withContext(Dispatchers.IO) { Dictionary(ctx) }
-                reloading = false
             }
         }
-    }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(if (tab == Tab.Reader) "英文阅读词典" else "生词本") },
-                actions = {
-                    TextButton(onClick = { importDb.launch(arrayOf("application/octet-stream", "*/*")) }) {
-                        Text("更新词库")
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == Tab.Reader,
+                        onClick = { tab = Tab.Reader },
+                        icon = { Text("📖") },
+                        label = { Text("阅读") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == Tab.Search,
+                        onClick = { tab = Tab.Search },
+                        icon = { Text("🔍") },
+                        label = { Text("搜索") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == Tab.Vocab,
+                        onClick = { tab = Tab.Vocab },
+                        icon = { Text("📒") },
+                        label = { Text("生词本") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == Tab.Settings,
+                        onClick = { tab = Tab.Settings },
+                        icon = { Text("⚙") },
+                        label = { Text("设置") }
+                    )
+                }
+            }
+        ) { pad ->
+            Box(Modifier.padding(pad).fillMaxSize()) {
+                when {
+                    loading -> Column(
+                        Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
+                        Text("首次启动正在解压词库，请稍候…")
                     }
-                    TextButton(onClick = { tab = if (tab == Tab.Reader) Tab.Vocab else Tab.Reader }) {
-                        Text(if (tab == Tab.Reader) "生词本" else "阅读")
+                    reloading -> Column(
+                        Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
+                        Text("正在更新词库…")
                     }
+                    tab == Tab.Reader -> ReaderScreen(dict!!, store)
+                    tab == Tab.Search -> SearchScreen(dict!!, store)
+                    tab == Tab.Vocab -> VocabScreen(store)
+                    else -> SettingsScreen(
+                        themeMode = themeMode,
+                        fontLevel = fontLevel,
+                        online = online,
+                        onTheme = {
+                            themeMode = it
+                            Prefs.setThemeMode(ctx, it)
+                        },
+                        onFont = {
+                            fontLevel = it
+                            Prefs.setFontLevel(ctx, it)
+                        },
+                        onOnline = {
+                            online = it
+                            Prefs.setOnline(ctx, it)
+                        },
+                        onUpdateDict = {
+                            importDb.launch(arrayOf("application/octet-stream", "*/*"))
+                        }
+                    )
                 }
-            )
-        }
-    ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when {
-                loading -> Column(
-                    Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(16.dp))
-                    Text("首次启动正在解压词库，请稍候…")
-                }
-                reloading -> Column(
-                    Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(16.dp))
-                    Text("正在更新词库…")
-                }
-                tab == Tab.Reader -> ReaderScreen(dict!!, store)
-                else -> VocabScreen(store)
             }
         }
     }
