@@ -15,7 +15,6 @@ data class DictEntry(
     val pos: String
 )
 
-/** 只读词典库：首次启动从 assets 解压到私有目录，之后可整包替换 */
 class Dictionary(context: Context) {
     private val db: SQLiteDatabase
 
@@ -59,9 +58,106 @@ class Dictionary(context: Context) {
         db.rawQuery("SELECT lemma FROM forms WHERE form = ? LIMIT 1", arrayOf(form)).use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         }
-}
+    fun suggest(prefix: String, limit: Int = 30): List<DictEntry> {
+        val q = prefix.trim().lowercase()
+        if (q.isEmpty()) return emptyList()
+        return rawList(
+            "SELECT word, phonetic, translation, definition, pos FROM dict " +
+                "WHERE word LIKE ? COLLATE NOCASE ORDER BY frq DESC LIMIT ?",
+            arrayOf("$q%", limit.toString())
+        )
+    }
 
-/** 用户数据：生词本，与词典库彻底分开，换词库不丢数据 */
+    fun inTranslation(text: String, limit: Int = 40): List<DictEntry> {
+        val q = text.trim()
+        if (q.isEmpty()) return emptyList()
+        return rawList(
+            "SELECT word, phonetic, translation, definition, pos FROM dict " +
+                "WHERE translation LIKE ? LIMIT ?",
+            arrayOf("%$q%", limit.toString())
+        )
+    }
+
+    fun phrasesOf(word: String, limit: Int = 12): List<DictEntry> {
+        val q = word.trim().lowercase()
+        if (q.isEmpty() || q.contains(' ')) return emptyList()
+        return rawList(
+            "SELECT word, phonetic, translation, definition, pos FROM dict " +
+                "WHERE word LIKE ? COLLATE NOCASE LIMIT ?",
+            arrayOf("$q %", limit.toString())
+        )
+    }
+
+    fun lemmaOf(word: String): String? {
+        val q = word.trim().lowercase()
+        if (q.isEmpty() || q.contains(' ')) return null
+        findLemma(q)?.let { if (it != q) return it }
+        val rules = listOf(
+            "ies" to "y", "ied" to "y", "ing" to "", "ed" to "",
+            "es" to "", "s" to "", "ly" to "", "er" to "", "est" to ""
+        )
+        for ((suf, rep) in rules) {
+            if (q.length > suf.length + 2 && q.endsWith(suf)) {
+                val base = q.dropLast(suf.length) + rep
+                if (base != q && find(base) != null) return base
+                if (suf == "ing" || suf == "ed") {
+                    if (find(base + "e") != null) return base + "e"
+                    if (base.length > 2 && base[base.length - 1] == base[base.length - 2]) {
+                        val one = base.dropLast(1)
+                        if (find(one) != null) return one
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    fun similar(word: String, limit: Int = 8): List<DictEntry> {
+        val q = word.trim().lowercase()
+        if (q.length < 3) return emptyList()
+        val rows = rawList(
+            "SELECT word, phonetic, translation, definition, pos FROM dict " +
+                "WHERE word LIKE ? COLLATE NOCASE AND length(word) BETWEEN ? AND ? LIMIT 4000",
+            arrayOf(q.take(1) + "%", (q.length - 2).toString(), (q.length + 2).toString())
+        )
+        return rows.map { it to distance(q, it.word.lowercase()) }
+            .filter { it.second <= 2 }
+            .sortedBy { it.second }
+            .take(limit)
+            .map { it.first }
+    }
+
+    private fun distance(a: String, b: String): Int {
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
+
+    private fun rawList(sql: String, args: Array<String>): List<DictEntry> =
+        db.rawQuery(sql, args).use { c ->
+            val out = mutableListOf<DictEntry>()
+            while (c.moveToNext()) {
+                out.add(
+                    DictEntry(
+                        c.getString(0).orEmpty(),
+                        c.getString(1).orEmpty(),
+                        c.getString(2).orEmpty(),
+                        c.getString(3).orEmpty(),
+                        c.getString(4).orEmpty()
+                    )
+                )
+            }
+            out
+        }
+}
 class VocabStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "user.db", null, 1) {
 
