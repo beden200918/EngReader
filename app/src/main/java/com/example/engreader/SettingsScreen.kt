@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -20,6 +22,12 @@ fun SettingsScreen(
     onOnline: (Boolean) -> Unit,
     onUpdateDict: () -> Unit
 ) {
+    val ctx = LocalContext.current
+    var appId by remember { mutableStateOf(Prefs.baiduAppId(ctx)) }
+    var apiKey by remember { mutableStateOf(Prefs.baiduApiKey(ctx)) }
+    var secret by remember { mutableStateOf(Prefs.baiduSecret(ctx)) }
+    var saved by remember { mutableStateOf(false) }
+
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -62,12 +70,66 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("联网增强", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "开启后可联网翻译例句、补充生僻词搭配",
+                            "开启后可联网翻译例句。查词内容会发送到百度翻译服务器，关闭时完全离线。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(checked = online, onCheckedChange = onOnline)
+                }
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("百度翻译密钥", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "仅保存在本机，不会上传。在百度智能云「文本翻译-通用版」应用中获取。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = appId,
+                    onValueChange = { appId = it; saved = false },
+                    label = { Text("APP ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; saved = false },
+                    label = { Text("API Key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it; saved = false },
+                    label = { Text("Secret Key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = {
+                        Prefs.setBaiduAppId(ctx, appId.trim())
+                        Prefs.setBaiduApiKey(ctx, apiKey.trim())
+                        Prefs.setBaiduSecret(ctx, secret.trim())
+                        saved = true
+                    }) { Text("保存密钥") }
+                    if (saved) {
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "已保存",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
         }
