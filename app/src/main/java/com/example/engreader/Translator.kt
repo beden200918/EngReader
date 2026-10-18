@@ -40,7 +40,7 @@ object Translator {
             if (json.has("error_code")) {
                 val code = json.optString("error_code", "?")
                 val msg = json.optString("error_msg", "")
-                return@withContext "翻译失败（$code）：$msg"
+                return@withContext "翻译失败（$code）：$msg\nappid=[$appId]，长度=${appId.length}"
             }
             val arr = json.getJSONArray("trans_result")
             val sb = StringBuilder()
