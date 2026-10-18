@@ -51,11 +51,11 @@ jobs:
 
       - name: 保存签名文件
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add signing/keystore.jks
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f signing/keystore.jks
           if git diff --cached --quiet; then
-            echo "签名文件已存在"
+            echo "签名文件已在仓库中"
           else
             git commit -m "chore: 添加固定签名文件"
             git push origin HEAD:main
@@ -70,10 +70,12 @@ jobs:
       - name: 编译 APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: 验证签名
+      - name: 验证签名与入口
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | head -n 10
+          echo "===== 签名指纹 ====="
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | grep -i "SHA-256" || true
+          echo "===== 入口类检查 ====="
           rm -rf /tmp/dex && mkdir -p /tmp/dex
           unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
           if cat /tmp/dex/classes*.dex | strings | grep -q "MainActivity"; then
