@@ -17,6 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -106,6 +109,23 @@ private fun CrashScreen(trace: String, onClear: () -> Unit) {
         }
     }
 }
+
+class ReaderMemo {
+    var text by mutableStateOf("")
+    var source by mutableStateOf("")
+
+    companion object {
+        val Saver: Saver<ReaderMemo, Any> = listSaver<ReaderMemo, String>(
+            save = { listOf(it.text, it.source) },
+            restore = { v ->
+                ReaderMemo().apply {
+                    text = v[0]
+                    source = v[1]
+                }
+            }
+        )
+    }
+}
 private enum class Tab { Reader, Search, Vocab, Settings }
 
 private fun scaleOf(level: Int): Float = when (level) {
@@ -132,6 +152,7 @@ fun App() {
     EngReaderTheme(darkTheme = dark, fontScale = scaleOf(fontLevel)) {
         val scope = rememberCoroutineScope()
         val store = remember { VocabStore(ctx) }
+        val memo = rememberSaveable(saver = ReaderMemo.Saver) { ReaderMemo() }
         var tab by remember { mutableStateOf(Tab.Reader) }
         var dict by remember { mutableStateOf<Dictionary?>(null) }
         var loading by remember { mutableStateOf(true) }
@@ -221,7 +242,7 @@ fun App() {
                         Spacer(Modifier.height(16.dp))
                         Text("正在更新词库…")
                     }
-                    tab == Tab.Reader -> ReaderScreen(dict!!, store)
+                    tab == Tab.Reader -> ReaderScreen(dict!!, store, memo)
                     tab == Tab.Search -> SearchScreen(dict!!, store)
                     tab == Tab.Vocab -> VocabScreen(store, dict!!)
                     else -> SettingsScreen(
@@ -250,11 +271,11 @@ fun App() {
     }
 }
 @Composable
-private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
+private fun ReaderScreen(dict: Dictionary, store: VocabStore, memo: ReaderMemo) {
     val ctx = LocalContext.current
 
-    var paragraphs by remember { mutableStateOf<List<String>>(emptyList()) }
-    var source by remember { mutableStateOf("") }
+    val paragraphs = remember(memo.text) { Tokenizer.splitParagraphs(memo.text) }
+    val source = memo.source
     var showPaste by remember { mutableStateOf(false) }
     var pasteText by remember { mutableStateOf("") }
 
@@ -272,8 +293,8 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
                 ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             }.getOrNull()
             if (!t.isNullOrBlank()) {
-                paragraphs = Tokenizer.splitParagraphs(t)
-                source = uri.lastPathSegment ?: "导入文本"
+                memo.text = t
+                memo.source = uri.lastPathSegment ?: "导入文本"
                 selPara = -1; anchor = -1; selFrom = -1; selTo = -1
             }
         }
@@ -305,7 +326,7 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
             OutlinedButton(onClick = { showPaste = true }) { Text("粘贴文本") }
             if (paragraphs.isNotEmpty()) {
                 TextButton(onClick = {
-                    paragraphs = emptyList()
+                    memo.text = ""
                     selPara = -1; anchor = -1; selFrom = -1; selTo = -1
                 }) { Text("清空") }
             }
@@ -387,8 +408,8 @@ private fun ReaderScreen(dict: Dictionary, store: VocabStore) {
             confirmButton = {
                 TextButton(onClick = {
                     if (pasteText.isNotBlank()) {
-                        paragraphs = Tokenizer.splitParagraphs(pasteText)
-                        source = "粘贴文本"
+                        memo.text = pasteText
+                        memo.source = "粘贴文本"
                         selPara = -1; anchor = -1; selFrom = -1; selTo = -1
                     }
                     showPaste = false
@@ -470,6 +491,14 @@ private fun LookupCard(
                     Text("/${entry!!.phonetic}/", color = MaterialTheme.colorScheme.outline)
                 }
             }
+            if (!entry?.word.isNullOrBlank() && !entry!!.word.equals(term, true)) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "原形：${entry.word}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Spacer(Modifier.height(8.dp))
 
             if (entry == null) {
@@ -503,7 +532,6 @@ private fun LookupCard(
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun VocabScreen(store: VocabStore, dict: Dictionary) {
