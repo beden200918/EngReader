@@ -8,6 +8,9 @@ object Prefs {
     private const val KEY_THEME = "theme_mode"
     private const val KEY_FONT = "font_level"
     private const val KEY_ONLINE = "online_enhance"
+    private const val KEY_APPID = "baidu_appid"
+    private const val KEY_APIKEY = "baidu_apikey"
+    private const val KEY_SECRET = "baidu_secret"
 
     private fun sp(c: Context) = c.getSharedPreferences(NAME, Context.MODE_PRIVATE)
 
@@ -46,4 +49,13 @@ object Prefs {
     }
 
     fun clearHistory(c: Context) = sp(c).edit().remove(KEY_HISTORY).apply()
+
+    fun baiduAppId(c: Context): String = sp(c).getString(KEY_APPID, "") ?: ""
+    fun setBaiduAppId(c: Context, v: String) = sp(c).edit().putString(KEY_APPID, v).apply()
+
+    fun baiduApiKey(c: Context): String = sp(c).getString(KEY_APIKEY, "") ?: ""
+    fun setBaiduApiKey(c: Context, v: String) = sp(c).edit().putString(KEY_APIKEY, v).apply()
+
+    fun baiduSecret(c: Context): String = sp(c).getString(KEY_SECRET, "") ?: ""
+    fun setBaiduSecret(c: Context, v: String) = sp(c).edit().putString(KEY_SECRET, v).apply()
 }
