@@ -1,4 +1,4 @@
-Num.2 type E与真嗣渚薰与汐名: 10-24 18:00:02
+
 package com.example.engreader
 
 import android.content.Context
